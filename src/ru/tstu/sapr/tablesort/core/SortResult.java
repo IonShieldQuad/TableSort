@@ -18,4 +18,8 @@ public class SortResult {
   public long getTime() {
     return time;
   }
+  
+  public int[] getData() {
+    return data;
+  }
 }
