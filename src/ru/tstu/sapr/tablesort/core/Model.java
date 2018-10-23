@@ -1,13 +1,13 @@
 package ru.tstu.sapr.tablesort.core;
 
-import java.util.ArrayList;
-import java.util.Random;
 import ru.tstu.sapr.tablesort.core.sorter.*;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Random;
+
 public class Model {
-  private static final int DATA_SIZE = 100;
-  public static final int DATA_MIN = 0;
-  public static final int DATA_MAX = DATA_SIZE * 10;
 
   public static final String[] SORT_METHODS_NAMES = {
     "Quick sort", "Cocktail sort", "Shell sort",
@@ -28,44 +28,77 @@ public class Model {
   }
 
   private LogWriter logWriter;
-  private Timer timer;
   private int[] data;
+  private int size;
+  private List<SortResult> results;
+  private boolean finished;
+  private AppEventListener listener;
 
-  Model(LogWriter logWriter) {
-    this.timer = new Timer();
+  Model(LogWriter logWriter, AppEventListener listener) {
     this.logWriter = logWriter;
-    data = new int[DATA_SIZE];
+    this.listener = listener;
+    size = 0;
+    data = new int[size];
+    results = new ArrayList<>();
+    finished = true;
   }
 
+  void setDataSize(int size) {
+    this.size = size;
+  }
+  
+  List<SortResult> getTestResults() {
+    return results;
+  }
+  
+  boolean isTestFinished() {
+    return finished;
+  }
+  
   int[] getData() {
     return data;
   }
-
-  int[] generateData() {
+  
+  private void generateData() {
     logWriter.writeMessage("Generating new data set...");
     Random random = new Random();
+    data = new int[size];
 
     for (int i = 0; i < data.length; i++)
-      data[i] = random.nextInt(DATA_MAX + 1);
+      data[i] = random.nextInt(size + 1);
 
     logWriter.writeMessage("Data set generated");
-    return data;
   }
 
-  ArrayList<SortResult> testAll() {
-    ArrayList<SortResult> results = new ArrayList<>();
+  void testAll() {
+    
+    if (!finished) {
+      logWriter.writeMessage("Test not started, reason: previous test not finished");
+      return;
+    }
+    
+    List<Thread> threads = new ArrayList<>();
     logWriter.writeMessage("Testing all sort methods");
 
-    for (int method = 0; method < SORT_METHODS_NAMES.length; method++) {
-      generateData();
-      results.add(testMethod(method));
+    results.clear();
+    finished = false;
+    generateData();
+    
+    //Generates threads
+    for (int method = 0; method < SORT_METHODS_NAMES.length; ++method) {
+      int m = method;
+      threads.add(new Thread(() -> testMethod(m)));
     }
-
-    logWriter.writeMessage("Test completed");
-    return results;
+    
+    //Starts threads
+    threads.forEach(Thread::start);
+    
+    logWriter.writeMessage("Test threads started");
   }
 
-  SortResult testMethod(int methodIndex) {
+  private void testMethod(int methodIndex) {
+    Timer timer = new Timer();
+    int[] copy = Arrays.copyOf(data, data.length);
     logWriter.writeMessage("Sorting data by: " + SORT_METHODS_NAMES[methodIndex]);
 
     Sorter sorter;
@@ -102,10 +135,22 @@ public class Model {
     }
 
     timer.start();
-    data = sorter.sort(data);
+    copy = sorter.sort(copy);
     timer.stop();
 
-    logWriter.writeMessage(String.format("Data sorted in %d us", timer.getMicros()));
-    return new SortResult(methodIndex, timer.getMicros());
+    logWriter.writeMessage(String.format("Data sorted by " + SORT_METHODS_NAMES[methodIndex] + " in %d us", timer.getMicros()));
+    
+    results.add(new SortResult(methodIndex, timer.getMicros(), copy));
+    
+    if (results.size() >= SORT_METHODS_NAMES.length) {
+      onTestFinish();
+    }
+    
+  }
+  
+  private void onTestFinish() {
+    finished = true;
+    logWriter.writeMessage("Test finished successfully");
+    listener.onAppEvent(Application.Event.TEST_FINISH);
   }
 }
