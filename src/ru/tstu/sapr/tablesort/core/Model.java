@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.CountDownLatch;
 
 public class Model {
 
@@ -30,7 +31,7 @@ public class Model {
   private LogWriter logWriter;
   private int[] data;
   private int size;
-  private List<SortResult> results;
+  private final List<SortResult> results;
   private boolean finished;
   private AppEventListener listener;
 
@@ -44,6 +45,9 @@ public class Model {
   }
 
   void setDataSize(int size) {
+    if (size <= 0) {
+      throw new IllegalArgumentException("Data size must be a positive integer");
+    }
     this.size = size;
   }
   
@@ -77,23 +81,42 @@ public class Model {
       return;
     }
     
-    List<Thread> threads = new ArrayList<>();
-    logWriter.writeMessage("Testing all sort methods");
-
-    results.clear();
-    finished = false;
-    generateData();
+    new Thread(() -> {
+      List<Thread> threads = new ArrayList<>();
+      logWriter.writeMessage("Testing all sort methods");
+  
+      results.clear();
+      finished = false;
+      generateData();
+  
+      CountDownLatch counter = new CountDownLatch(SORT_METHODS_NAMES.length);
+      
+      //Generates threads
+      for (int method = 0; method < SORT_METHODS_NAMES.length; ++method) {
+        int m = method;
+        threads.add(new Thread(() -> {
+          testMethod(m);
+          counter.countDown();
+        }));
+      }
+  
+      //Starts threads
+      threads.forEach(Thread::start);
+  
+      logWriter.writeMessage("Test threads started");
+  
+      try {
+        counter.await();
+        onTestFinish();
+      } catch (InterruptedException e) {
+        e.printStackTrace();
+      } finally {
+        finished = true;
+      }
+      
+  
+    }).start();
     
-    //Generates threads
-    for (int method = 0; method < SORT_METHODS_NAMES.length; ++method) {
-      int m = method;
-      threads.add(new Thread(() -> testMethod(m)));
-    }
-    
-    //Starts threads
-    threads.forEach(Thread::start);
-    
-    logWriter.writeMessage("Test threads started");
   }
 
   private void testMethod(int methodIndex) {
@@ -140,16 +163,13 @@ public class Model {
 
     logWriter.writeMessage(String.format("Data sorted by " + SORT_METHODS_NAMES[methodIndex] + " in %d us", timer.getMicros()));
     
-    results.add(new SortResult(methodIndex, timer.getMicros(), copy));
-    
-    if (results.size() >= SORT_METHODS_NAMES.length) {
-      onTestFinish();
+    synchronized (results) {
+      results.add(new SortResult(methodIndex, timer.getMicros(), copy));
     }
     
   }
   
   private void onTestFinish() {
-    finished = true;
     logWriter.writeMessage("Test finished successfully");
     listener.onAppEvent(Application.Event.TEST_FINISH);
   }
